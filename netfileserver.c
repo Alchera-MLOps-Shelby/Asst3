@@ -16,7 +16,31 @@ struct buffStruct {
 	int newSockfd;
 }
 
-void* handleClient(void* buff) {
+void* handleClientSocket(void* buff) {
+	char* buffer = ((struct buffStruct*) buffStruct) -> buffer;
+	int newSockfd = ((struct buffStruct*) buffStruct) -> newSockfd;
+	char* message = "";
+	int thisManyBytes = 0;
+
+	while(1) {
+		//Empty buffer
+		bzero(buffer, 256);
+		//Start netread from client socket
+		int clientStatus = read(newSockfd, buffer, 255);
+		//If read unsuccessful, print error
+		if(clientStatus == -1) {
+			perror("read from socket unsuccessful");
+		}
+
+		//netopen, netclose, netread, netwrite, else error
+
+		//changes written to client socket
+
+		clientStatus = write(newSockfd, message, thisManyBytes)
+		if(clientStatus == -1) {
+			perror("write to socket unsuccessful");
+		}
+	}
 	free(buffer);
 	free(buff);
 	return NULL;
@@ -81,7 +105,7 @@ int main(int argc, char** argv) {
 		}
 		//POSIX thread creation
 		pthread_t pt;
-		pthread_create(&pt, NULL, handleClient, buff[buffIndex]);
+		pthread_create(&pt, NULL, handleClientSocket, buff[buffIndex]);
 		//Increase buffIndex for new client
 		buffIndex++;
 	}
