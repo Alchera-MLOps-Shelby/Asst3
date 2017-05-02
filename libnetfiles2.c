@@ -24,47 +24,76 @@ int file_mode = -1;
 
 int netopen(const char *pathname, int flags)
 {
-  Packets pack;
+  //printf("in netopen\n");
+  Packet pack;
   // Check to make sure netserverinit has been called to handle socket binding
   if(serv_sock == -1)
   {
    perror("ERROR: Cannot OPEN file; Server socket connection not established\n");
    return -1;
   }
- char buffer[700];
- strcpy(buffer,"o");    
+
+  char buffer[7000];
+  strcpy(buffer, "o");
+  //printf("buf[0]: %c\n", buffer[0]);
  //Check for correct argument flags
- if((flags != O_RDONLY) && (flags != O_WRONLY) && (flags != O_RDWR))
- {
-  perror("ERROR: Flag of Invalid Type\n");
-  return -1;
+ if(flags == 1)
+ {  
+  //printf("in flags == 1\n");
+    strcat(buffer, "r");
+    //printf("buf[0]: %c\n", buffer[0]);
+    //printf("buf[1]: %c\n", buffer[1]);
  }
+  else if(flags == 2)
+  {
+    //printf("in flags == 2\n");
+    strcat(buffer, "w");
+      //printf("buf[0]: %c\n", buffer[0]);
+    //printf("buf[1]: %c\n", buffer[1]);
+  }
+  else if(flags == 3)
+  {
+    //printf("in flags == 3\n");
+    strcat(buffer, "b");
+      //printf("buf[0]: %c\n", buffer[0]);
+    //printf("buf[1]: %c\n", buffer[1]);
+  }
+  else{
+    //printf("Error: Invalid flag.");
+    return -1;
+  }
 
  strcat(buffer, pathname);
  strcat(buffer, "\0");
-   
- send(serv_sock, buffer, strlen(buffer), flags);
- recv(serv_sock, &pack, sizof(pack), flags);
-
+ //printf("B4 send exiting netopen\n");
+ send(serv_sock, buffer, strlen(buffer), 0);
+ //printf("B4 recv back in netopen\n");
+ recv(serv_sock, &pack, sizeof(pack), 0);
+ //printf("After recv in netopne\n");
+  //printf("pack.flagtype: %c\n", pack.flagtype);
  if(pack.flagtype == 'e')
  {
   errno = pack.errOrFd; // Returns errno
   perror("ERROR\n");
   return -1;
  }
-
  else if(pack.flagtype == 'r')
  {
+ // printf("pack.errOrFd: %d\n", pack.errOrFd);
   return pack.errOrFd; // Returns Filedescriptor
  }
   else
-  return -1;
+  {
+   // printf("In else\n");
+   return -1;
+  }
 }
 
 // Return: non-negative int indicating #bytes read, else return -1 & set errno in caller's context to indicate error
 //Errors-to-check: ETIMEDOUT,EBADF,ECONNRESET
-ssize_t netread(int fildes, void *buf, size_t nbyte)
+ssize_t netread(int fildes, char *buf, size_t nbyte)
 {
+  //printf("IN net read\n");
   // Check to make sure netserverinit has been called to handle socket binding
   if(serv_sock == -1)
   {
@@ -79,7 +108,7 @@ ssize_t netread(int fildes, void *buf, size_t nbyte)
   messageSend.errOrFd = fildes;
   messageSend.size = nbyte;
   
-  send(server_sock, &messageSend, sizeof(messageSend), 0);
+  send(serv_sock, &messageSend, sizeof(messageSend), 0);
   recv(serv_sock, messageRecv, sizeof(messageRecv), 0);
 
   if(messageRecv[0] == 'e')
@@ -100,8 +129,9 @@ ssize_t netread(int fildes, void *buf, size_t nbyte)
 
 //Return: #bytes actually written to file assoc w/ fildes. never >nbyte, else -1 throw errno
 //Errors-to-check: EBADF, ETIMEOUT,ECONNRESET
-ssize_t netwrite(int fildes, const void *buf, size_t nbyte)
+ssize_t netwrite(int filedes, char *buf, size_t nbyte)
 {
+  printf("IN net write\n");
  // Check to make sure netserverinit has been called to handle socket binding
   if(serv_sock == -1)
   {
@@ -121,18 +151,19 @@ ssize_t netwrite(int fildes, const void *buf, size_t nbyte)
   free(messageSend);
   recv(serv_sock, &messageRecv, sizeof(messageRecv),0);
 
-  if(messageRecv.flagtype = 'e')
+  if((messageRecv.flagtype) == 'e')
   {
    errno = messageRecv.errOrFd;
    return -1;
   }
-  retrun messageRecv.size;
+  return messageRecv.size;
 }
 
 //Return: 0 on success, error -1 set errno
 //Errors-to-check: EBADF
 int netclose(int fd)
 {
+  //printf("IN net close\n");
  // Check to make sure netserverinit has been called to handle socket binding
   if(serv_sock == -1)
   {
@@ -142,12 +173,12 @@ int netclose(int fd)
   
   Packet messageSend, messageRecv;
   messageSend.flagtype = 'c';
-  message.errOrFd = fd; // set to filedescriptor
+  messageSend.errOrFd = fd; // set to filedescriptor
 
   send(serv_sock, &messageSend, sizeof(messageSend), 0);
   recv(serv_sock, &messageRecv, sizeof(messageRecv), 0);
 
-  if(messageRecv.flagtype = 'e')
+  if((messageRecv.flagtype) == 'e')
   {
    errno = messageRecv.errOrFd; // set to errno
    perror("ERROR: could not close properly\n");
@@ -156,11 +187,21 @@ int netclose(int fd)
   return 0; 
 }
 
+void *get_in_addr(struct sockaddr *sa)  
+{
+  //printf("get_in_addr\n");
+  return sa->sa_family == AF_INET
+    ? (void *) &(((struct sockaddr_in*)sa)->sin_addr)
+    : (void *) &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+
 //Return: 0 on success, error -1 & h_errnor set correctly***
 // fct of type int?
 //Errors-to-check: HOST_NOT_FOUND(ext A: INVALID_FILE_MODE)
-int netserverinit(char * hostname, int filemode) {
-
+int netserverinit(char * hostname, int filemode) 
+{
+  //printf("IN netserverinit\n");
     // Declare socket address struct
     struct addrinfo hints, *servinfo, *p;
     char s[INET6_ADDRSTRLEN]; // 46
@@ -214,7 +255,7 @@ int netserverinit(char * hostname, int filemode) {
   // Free server information
   freeaddrinfo(servinfo);
   //set server socket filedescriptor to to the connection that was just made
-  serv_sock = sockfd
+  serv_sock = sockfd;
   //set file_mode to the mode that was passed in through client
   file_mode = filemode;
   return 0;
