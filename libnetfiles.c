@@ -10,11 +10,12 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <netdb.h.h> 
+#include <netdb.h> 
 #include "libnetfiles.h"
-#define PORTNUM 12345
 #define BACKLOG 20
 
+int serv_sock = -1;
+int file_mode = -1;
 
 // Creates new socket, & binds, then open file given by pathname
 //flags: O_RDONLY,O_WRONLY,O_RDWR
@@ -23,258 +24,216 @@
 
 int netopen(const char *pathname, int flags)
 {
- struct addrinfo hints, *servinfo, *p;
- int sockfd, rv;
- int yes = 1;
+  Packet pack;
+  // Check to make sure netserverinit has been called to handle socket binding
+  if(serv_sock == -1)
+  {
+   perror("ERROR: Cannot OPEN file; Server socket connection not established\n");
+   return -1;
+  }
+
+  char buffer[7000];
+  strcpy(buffer, "o");
+  
  //Check for correct argument flags
- if((flags != O_RDONLY) && (flags != O_WRONLY) && (flags != O_RDWR))
+ if(flags == 1)
  {
+    strcat(buffer, "r");
+ }
+  else if(flags == 2){
+    strcat(buffer, "w");
+  }
+  else if(flags == 3){
+    strcat(buffer, "b");
+  }
+  else{
+    printf("Error: Invalid flag.");
+    return -1;
+  }
+
+ strcat(buffer, pathname);
+ strcat(buffer, "\0");
+
+ send(serv_sock, pathname, strlen(pathname), 0);
+ recv(serv_sock, &pack, sizeof(pack), 0);
+
+ if(pack.flagtype == 'e')
+ {
+  errno = pack.errOrFd; // Returns errno
+  perror("ERROR\n");
   return -1;
  }
-  
-  memset(&hints, 0, sizeof(hints));//make sure the struct is empty
-  hints.ai_family = AF_UNSPEC; // don't care whether IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM; // TCP protocol
-  hints.ai_flags = AI_PASSIVE; // fill in IP address automatically
-  
-  // MAKE SERVER INFO POINT TO A LINKED LIST OF 1 or MORE STRUCT ADDRINFOS
-  if((rv = getaddrinfo(NULL, PORTNUM, &hints, &servinfo)) != 0)
-  {
-  	fprintf(stderr, "gettaddrinfo error: %s\n", gai+strerror(status));
-  	return 1;
-  }
-  
-  // loop through & bind to first socket possible
-  for(p = servinfo; p != NULL; p = p->ai_next)
-  { 
-  	 //create socket file descriptor with parameters created from getaddrinfo() method
-  	if((sockfd = socket(p->ai_family, p->ai_socktype)) == -1)
-  	{
-  	 ernno("server: socket");
-  	 continue;
-  	}
-  
 
-  if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) ==-1)
-  {
-  	errno("setsockopt");
-  	return -1;
-  }
-  
-  // Bind socket
-  if(bind(sockfd, p_ai_addr, p->ai_addrlen) == -1)
-  {
-   close(sockfd);
-   errno("Server: bind");
-   continue;
-  }
-  break;
+ else if(pack.flagtype == 'r')
+ {
+  return pack.errOrFd; // Returns Filedescriptor
  }
-
-   //sockfd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-   //bind(sockfd, servinfo->ai_addr, servinfo->ai_addrlen);
-  
-  // open file
-  sockfd = open(pathname, flags);
-  
-  freeaddrinfo(servinfo);
-  
-  return sockfd;
-   
-
-
-
-
-  // grab parameters
-  // parse(pathname)
-  // make message
-  //write message 
-
-  //read response
-  //set retval &errno, h_errno
-  //close socket
-  //return
+  else
+  return -1;
 }
 
 // Return: non-negative int indicating #bytes read, else return -1 & set errno in caller's context to indicate error
 //Errors-to-check: ETIMEDOUT,EBADF,ECONNRESET
-ssize_t netread(int fildes, void *buf, size_t nbyte)
+ssize_t netread(int fildes, char *buf, size_t nbyte)
 {
- int k = 0;
- struct addrinfo hints, *servinfo, *p;
- int sockfd, rv;
- int yes = 1;
- //Check for correct argument flags
- if((flags != O_RDONLY) && (flags != O_WRONLY) && (flags != O_RDWR))
- {
-  return -1;
- }
-  
-  memset(&hints, 0, sizeof(hints));//make sure the struct is empty
-  hints.ai_family = AF_UNSPEC; // don't care whether IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM; // TCP protocol
-  hints.ai_flags = AI_PASSIVE; // fill in IP address automatically
-  
-  // MAKE SERVER INFO POINT TO A LINKED LIST OF 1 or MORE STRUCT ADDRINFOS
-  if((rv = getaddrinfo(NULL, PORTNUM, &hints, &servinfo)) != 0)
+  // Check to make sure netserverinit has been called to handle socket binding
+  if(serv_sock == -1)
   {
-  	fprintf(stderr, "gettaddrinfo error: %s\n", gai+strerror(status));
-  	return 1;
+   perror("ERROR: Cannot OPEN file; Server socket connection not established\n");
+   return -1;
   }
   
-  // loop through & bind to first socket possible
-  for(p = servinfo; p != NULL; p = p->ai_next)
-  { 
-  	 //create socket file descriptor with parameters created from getaddrinfo() method
-  	if((sockfd = socket(p->ai_family, p->ai_socktype)) == -1)
-  	{
-  	 ernno("server: socket");
-  	 continue;
-  	}
+  ssize_t totalBytesRead; 
+  Packet messageSend;
+  char* messageRecv = malloc(nbyte + sizeof(char) + sizeof(ssize_t));
+  messageSend.flagtype = 'r';
+  messageSend.errOrFd = fildes;
+  messageSend.size = nbyte;
   
+  send(serv_sock, &messageSend, sizeof(messageSend), 0);
+  recv(serv_sock, messageRecv, sizeof(messageRecv), 0);
 
-  if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) ==-1)
+  if(messageRecv[0] == 'e')
   {
-  	errno("setsockopt");
-  	return -1;
+    free(messageRecv);
+    return -1;
   }
-  
-  // Bind socket
-  if(bind(sockfd, p_ai_addr, p->ai_addrlen) == -1)
+  else if(messageRecv[0] == 'r')
   {
-   close(sockfd);
-   errno("Server: bind");
-   continue;
-  }
-  break;
- }
+   memcpy(&totalBytesRead, messageRecv + 1, sizeof(ssize_t));
+   memcpy(buf, messageRecv + 9, totalBytesRead);
 
- // WRITE READ CODE HERE with sockfd
- int numOfBytesRead;
- int totalBytesRead = 0;
- do
- {
-  numOfBytesRead = read(fildes, buf, nbyte);
-  totalBytesRead += numOfBytesRead;
- }while(numOfBytesRead != 0);
- 
- if(totalBytesRead < 0)
- {
+   free(messageRecv);
+   return totalBytesRead;
+  }
   return -1;
- }
- 
- return totalBytesRead;
- 
 }
 
 //Return: #bytes actually written to file assoc w/ fildes. never >nbyte, else -1 throw errno
 //Errors-to-check: EBADF, ETIMEOUT,ECONNRESET
-ssize_t netwrite(int fildes, const void *buf, size_t nbyte)
+ssize_t netwrite(int filedes, char *buf, size_t nbyte)
 {
- struct addrinfo hints, *servinfo, *p;
- int sockfd, rv;
- int yes = 1;
- //Check for correct argument flags
- if((flags != O_RDONLY) && (flags != O_WRONLY) && (flags != O_RDWR))
- {
-  return -1;
- }
-  
-  memset(&hints, 0, sizeof(hints));//make sure the struct is empty
-  hints.ai_family = AF_UNSPEC; // don't care whether IPv4 or IPv6
-  hints.ai_socktype = SOCK_STREAM; // TCP protocol
-  hints.ai_flags = AI_PASSIVE; // fill in IP address automatically
-  
-  // MAKE SERVER INFO POINT TO A LINKED LIST OF 1 or MORE STRUCT ADDRINFOS
-  if((rv = getaddrinfo(NULL, PORTNUM, &hints, &servinfo)) != 0)
+ // Check to make sure netserverinit has been called to handle socket binding
+  if(serv_sock == -1)
   {
-  	fprintf(stderr, "gettaddrinfo error: %s\n", gai+strerror(status));
-  	return 1;
+   perror("ERROR: Cannot OPEN file; Server socket connection not established\n");
+   return -1;
   }
   
-  // loop through & bind to first socket possible
-  for(p = servinfo; p != NULL; p = p->ai_next)
-  { 
-  	 //create socket file descriptor with parameters created from getaddrinfo() method
-  	if((sockfd = socket(p->ai_family, p->ai_socktype)) == -1)
-  	{
-  	 ernno("server: socket");
-  	 continue;
-  	}
-  
+  char* messageSend = malloc(nbyte + 1 + sizeof(int) + sizeof(size_t));
+  Packet messageRecv;
 
-  if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) ==-1)
-  {
-  	errno("setsockopt");
-  	return -1;
-  }
-  
-  // Bind socket
-  if(bind(sockfd, p_ai_addr, p->ai_addrlen) == -1)
-  {
-   close(sockfd);
-   errno("Server: bind");
-   continue;
-  }
-  break;
- }
- 
- // WRITE WRITE CODE HERE WITH sockfd
- int numbytesWritten;
- int totalBytesWritten = 0;
- do
- {
-  numbytesWritten = write(fildes, buf, nbyte)
-  if(numbytesWritten < 0)
-  	break;
-  totalBytesWritten += numbytesWritten;
- }while(numbytesWritten != 0);
+  messageSend[0] = 'w';
+  memcpy(messageSend + 1, &filedes, sizeof(int));
+  memcpy(messageSend + 1 + sizeof(int), &nbyte, sizeof(nbyte));
+  memcpy(messageSend + 1 + sizeof(int) + sizeof(size_t),buf, nbyte);
 
- if(totalBytesWritten < 0)
- {	
-  return -1;
- }
- return totalBytesWritten;
+  send(serv_sock, messageSend, sizeof(messageSend), 0);
+  free(messageSend);
+  recv(serv_sock, &messageRecv, sizeof(messageRecv),0);
+
+  if((messageRecv.flagtype) == 'e')
+  {
+   errno = messageRecv.errOrFd;
+   return -1;
+  }
+  return messageRecv.size;
 }
 
 //Return: 0 on success, error -1 set errno
 //Errors-to-check: EBADF
 int netclose(int fd)
 {
- close(fd);
+ // Check to make sure netserverinit has been called to handle socket binding
+  if(serv_sock == -1)
+  {
+   perror("ERROR: Cannot OPEN file; Server socket connection not established\n");
+   return -1;
+  }
+  
+  Packet messageSend, messageRecv;
+  messageSend.flagtype = 'c';
+  messageSend.errOrFd = fd; // set to filedescriptor
+
+  send(serv_sock, &messageSend, sizeof(messageSend), 0);
+  recv(serv_sock, &messageRecv, sizeof(messageRecv), 0);
+
+  if((messageRecv.flagtype) == 'e')
+  {
+   errno = messageRecv.errOrFd; // set to errno
+   perror("ERROR: could not close properly\n");
+  }
+
+  return 0; 
 }
+
+void *get_in_addr(struct sockaddr *sa) {
+  return sa->sa_family == AF_INET
+    ? (void *) &(((struct sockaddr_in*)sa)->sin_addr)
+    : (void *) &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
 
 //Return: 0 on success, error -1 & h_errnor set correctly***
 // fct of type int?
 //Errors-to-check: HOST_NOT_FOUND(ext A: INVALID_FILE_MODE)
-int netserverinit(char * hostname) // ,int filemode) (ext A)
-{
- struct sockaddr_in serverAddressInfo;
- struct hostent *serverIPAddress;
- 
- memset((char*)&serverAddressInfo, 0, sizeof(serverAddressInfo));
- serverAddressInfo.sin_family = AF_INET;
- serverAddressInfo.sin_port = htons(PORTNUM);
- serverIPAddress = gethostbyname(hostname);
- 
- if(serverIPAddress == NULL)
- {
-  fprintf(stderr, "ERROR, no such host\n");
-  return -1;
- }
+int netserverinit(char * hostname, int filemode) {
 
- sockfd = socket(AF_INET, SOCK_STREAM, 0);
- if(sockfd < 0)
- {
-  error("ERROR creating socket");
- }
+    // Declare socket address struct
+    struct addrinfo hints, *servinfo, *p;
+    char s[INET6_ADDRSTRLEN]; // 46
+    int sockfd, flag;
 
- bzero((char *)&serverAddressInfo, sizeof(serverAddressInfo));
+    // Fill in struct with zeroes
+  bzero((char *)&hints, sizeof(hints));
 
- serverAddressInfo.sin_family = AF_INET;
- serverAddressInfo.sin_port = htons(PORTNUM);
+  // Manually initialize the address information
+    hints.ai_family = AF_UNSPEC;      // IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;    // Sets as TCP
 
- bcopy((char*)serverIPAddress->h_addr,(char *)&serverAddressInfo.sin_addr.s_addr, serverIPAddress->h_length);
+    // Automatically initialize the address information from host
+    if ((flag = getaddrinfo(hostname, PORTNUM, &hints, &servinfo)) != 0) 
+    {
+        fprintf(stderr, "Client: %s\n", gai_strerror(flag));
+        return -1;
+    }
 
- return 0;
+    // Loop through server information for the appropriate address information to start a socket
+  for (p = servinfo; p != NULL; p = p->ai_next) 
+  {
+
+    // Attempt to open socket with address information
+    if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) {
+      perror("Client");
+      continue;
+    }
+
+    // Connect to the server
+    if (connect(sockfd, p->ai_addr, p->ai_addrlen) < 0) {
+
+      // Close socket if connection failed
+      close(sockfd);
+      continue;
+    }
+
+    // Successful connection found
+    break;
+  }
+
+  // Check if socket was not bound
+  if (p == NULL) 
+  {
+    return -1;
+  }
+
+  // Get IP address from socket address
+  inet_ntop(p->ai_family, get_in_addr((struct sockaddr *)p->ai_addr), s, sizeof(s));
+
+  // Free server information
+  freeaddrinfo(servinfo);
+  //set server socket filedescriptor to to the connection that was just made
+  serv_sock = sockfd;
+  //set file_mode to the mode that was passed in through client
+  file_mode = filemode;
+  return 0;
 }
